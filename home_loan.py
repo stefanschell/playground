@@ -6,6 +6,8 @@ class HomeLoan:
 
     @staticmethod
     def get_recurring_payment_c(*, n, p, r):
+        if p <= 0 or n == 0:
+            return None
         return p * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
 
     @staticmethod
@@ -26,7 +28,8 @@ class HomeLoan:
                 o = rel_Os.sum()
         return o
 
-    def __init__(self, *, N, k, P, R0):
+    def __init__(self, label, *, N, k, P, R0):
+        self.label = label
         self.N = N
         self.k = k
         self.P = P
@@ -38,6 +41,9 @@ class HomeLoan:
         self.m0 = self.c0 * self.k / 12
 
     def print(self):
+        print("--------------------------------------------------------")
+        print("-" + self.label + "-")
+        print("--------------------------------------------------------")
         print("--- Configuration ---")
         print("Term length N:", self.N, "yrs")
         print("Payments per year k:", self.k)
@@ -63,27 +69,25 @@ class HomeLoan:
         o = 0
         e = 0
         i = 0
-        while p > o + e:
-            i += 1
-
+        c = 0
+        while p > e and c is not None:
             prev_month = (i - 1) * 12 / self.k
             curr_month = (i + 0) * 12 / self.k
             curr_year = (i + 0) / self.k
 
-            r = self.get_current_rate_r(r=r, k=self.k, Rs=Rs, month=prev_month)
-            c = self.get_recurring_payment_c(n=self.n - i, p=p, r=r)
+            r = self.get_current_rate_r(r=r, k=self.k, Rs=Rs, month=curr_month)
+            c = self.get_recurring_payment_c(n=self.n + 1 - i, p=p, r=r) if i > 0 else 0
 
             prev_o = self.get_accumulated_offset_o(Os=Os, month=prev_month)
             o = self.get_accumulated_offset_o(Os=Os, month=curr_month)
             o_pay = o - prev_o
 
-            total_pay = c
+            total_pay = c if c is not None else 0
+            interest_pay_planned = p * r if i > 0 else 0
+            interest_pay_actual = max(0, p - (o + e)) * r if i > 0 else 0
 
-            interest_pay_planned = p * r
             principal_pay = total_pay - interest_pay_planned
-
-            interest_pay = (p - (o + e)) * r
-            extra_pay = interest_pay_planned - interest_pay
+            extra_pay = interest_pay_planned - interest_pay_actual
 
             p -= principal_pay
             e += extra_pay
@@ -95,14 +99,18 @@ class HomeLoan:
                     curr_year,
                     r * self.k,
                     o_pay,
-                    interest_pay,
+                    interest_pay_actual,
                     principal_pay,
                     extra_pay,
+                    total_pay,
                     p,
                     o,
                     e,
+                    p - e,
                 )
             )
+
+            i += 1
 
         plan = pd.DataFrame(
             plan,
@@ -115,9 +123,11 @@ class HomeLoan:
                 "interest_pay",
                 "principal_pay",
                 "extra_pay",
+                "total_pay",
                 "principal",
                 "offset",
                 "extra",
+                "remaining",
             ],
         )
         plan.set_index("i", drop=False, inplace=True)
@@ -131,37 +141,34 @@ class HomeLoan:
         return plan
 
 
-def plot(ax1, plan: pd.DataFrame):
+def plot(ax1, label, plan: pd.DataFrame):
+    ax1.set_title(label)
     ax2 = ax1.twinx()
     # axis 1
 
     ax1.plot(plan["year"], plan["principal"], "k-", label="principal")
     ax1.plot(plan["year"], plan["offset"], "m-", label="offset")
-    ax1.plot(plan["year"], plan["offset"] + plan["extra"], "c-", label="offset + extra")
+    ax1.plot(plan["year"], plan["extra"], "g-", label="extra")
 
     principal_half = plan.loc[
-        plan["principal"] <= 0.5 * plan["principal"].iloc[0]
+        (plan["principal"] > 0) & (plan["principal"] <= 0.5 * plan["principal"].iloc[0])
     ].iloc[0]
     ax1.axhline(y=principal_half["principal"], color="y", linestyle="-")
     ax1.axvline(x=principal_half["year"], color="y", linestyle="-")
 
     ax1.set_xlabel("Years")
-    ax1.set_ylabel("Remaining")
+    ax1.set_ylabel("Principal")
     ax1.legend(loc="lower left")
 
     # axis 2
 
-    ax2.plot(plan["year"], plan["interest_pay"], "r--", label="interest")
-    ax2.plot(plan["year"], plan["principal_pay"], "g--", label="principal")
-    ax2.plot(
-        plan["year"],
-        plan["interest_pay"] + plan["principal_pay"] + plan["extra_pay"],
-        "b--",
-        label="interest + principal + exta",
-    )
+    ax2.plot(plan["year"][1:], plan["interest_pay"][1:], "r--", label="interest")
+    ax2.plot(plan["year"][1:], plan["principal_pay"][1:], "k--", label="principal")
+    ax2.plot(plan["year"][1:], plan["extra_pay"][1:], "g-.", label="extra")
+    ax2.plot(plan["year"][1:], plan["total_pay"][1:], "b--", label="total")
 
     interest_principal_turnover = plan.loc[
-        plan["principal_pay"] >= plan["interest_pay"]
+        (plan["principal_pay"] > 0) & (plan["principal_pay"] >= plan["interest_pay"])
     ].iloc[0]
     ax2.axhline(
         y=interest_principal_turnover["principal_pay"], color="y", linestyle="--"
@@ -176,8 +183,8 @@ if __name__ == "__main__":
 
     # setup
 
-    P = 1100000
-    N = 20
+    P = 1200000
+    N = 25
     k = 12
     R0 = 0.065
 
@@ -188,19 +195,19 @@ if __name__ == "__main__":
     Rs.set_index("month", drop=False, inplace=True)
 
     Os = []
-    Os.append((0, 100000))
+    Os.append((0, 200000))
     Os = pd.DataFrame(Os, columns=["month", "amount"])
     Os.set_index("month", drop=False, inplace=True)
 
     # loan 1
 
-    myLoan1 = HomeLoan(N=N, k=k, P=P, R0=R0)
+    myLoan1 = HomeLoan("Loan 1", N=N, k=k, P=P, R0=R0)
     myLoan1.print()
     plan1 = myLoan1.simulate()
 
     # loan2
 
-    myLoan2 = HomeLoan(N=N, k=k, P=P, R0=R0)
+    myLoan2 = HomeLoan("Loan 2", N=N, k=k, P=P, R0=R0)
     myLoan2.print()
     plan2 = myLoan2.simulate(Rs=Rs, Os=Os)
 
@@ -208,8 +215,8 @@ if __name__ == "__main__":
 
     _, axs = plt.subplots(nrows=2, figsize=(15, 15))
 
-    plot(axs[0], plan1)
-    plot(axs[1], plan2)
+    plot(axs[0], myLoan1.label, plan1)
+    plot(axs[1], myLoan2.label, plan2)
 
     axs[1].set_xlim(axs[0].get_xlim())
 
