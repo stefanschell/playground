@@ -84,7 +84,7 @@ class HomeLoan:
 
             total_pay = c if c is not None else 0
             interest_pay_planned = p * r if i > 0 else 0
-            interest_pay_actual = max(0, p - (o + e)) * r if i > 0 else 0
+            interest_pay_actual = max(0, p - (prev_o + e)) * r if i > 0 else 0
 
             principal_pay = total_pay - interest_pay_planned
             extra_pay = interest_pay_planned - interest_pay_actual
@@ -150,11 +150,13 @@ def plot(ax1, label, plan: pd.DataFrame):
     ax1.plot(plan["year"], plan["offset"], "m-", label="offset")
     ax1.plot(plan["year"], plan["extra"], "g-", label="extra")
 
-    principal_half = plan.loc[
-        (plan["principal"] > 0) & (plan["principal"] <= 0.5 * plan["principal"].iloc[0])
-    ].iloc[0]
-    ax1.axhline(y=principal_half["principal"], color="y", linestyle="-")
-    ax1.axvline(x=principal_half["year"], color="y", linestyle="-")
+    ind = (plan["principal"] > 0) & (
+        plan["principal"] <= 0.5 * plan["principal"].iloc[0]
+    )
+    if any(ind):
+        principal_half = plan.loc[ind].iloc[0]
+        ax1.axhline(y=principal_half["principal"], color="y", linestyle="-")
+        ax1.axvline(x=principal_half["year"], color="y", linestyle="-")
 
     ax1.set_xlabel("Years")
     ax1.set_ylabel("Principal")
@@ -167,13 +169,13 @@ def plot(ax1, label, plan: pd.DataFrame):
     ax2.plot(plan["year"][1:], plan["extra_pay"][1:], "g-.", label="extra")
     ax2.plot(plan["year"][1:], plan["total_pay"][1:], "b--", label="total")
 
-    interest_principal_turnover = plan.loc[
-        (plan["principal_pay"] > 0) & (plan["principal_pay"] >= plan["interest_pay"])
-    ].iloc[0]
-    ax2.axhline(
-        y=interest_principal_turnover["principal_pay"], color="y", linestyle="--"
-    )
-    ax2.axvline(x=interest_principal_turnover["year"], color="y", linestyle="--")
+    ind = (plan["principal_pay"] > 0) & (plan["principal_pay"] >= plan["interest_pay"])
+    if any(ind):
+        interest_principal_turnover = plan.loc[ind].iloc[0]
+        ax2.axhline(
+            y=interest_principal_turnover["principal_pay"], color="y", linestyle="--"
+        )
+        ax2.axvline(x=interest_principal_turnover["year"], color="y", linestyle="--")
 
     ax2.set_ylabel("Payments")
     ax2.legend(loc="center right")
@@ -183,7 +185,7 @@ if __name__ == "__main__":
 
     # setup
 
-    P = 1200000
+    P = 1250000
     N = 25
     k = 12
     R0 = 0.065
@@ -196,6 +198,8 @@ if __name__ == "__main__":
 
     Os = []
     Os.append((0, 200000))
+    # for month in range(1, N * 12):
+    #    Os.append((month, 2000))
     Os = pd.DataFrame(Os, columns=["month", "amount"])
     Os.set_index("month", drop=False, inplace=True)
 
